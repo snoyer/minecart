@@ -148,6 +148,16 @@ class ColoredInterpreter(pdfminer.pdfinterp.PDFPageInterpreter):
             else:
                 name = pdfminer.psparser.literal_name(spec)
                 params = []
+            if name == 'ICCBased' :
+                fallbacks_by_N = {
+                    1: 'DeviceGray',
+                    3: 'DeviceRGB',
+                    4: 'DeviceCMYK',
+                }
+                for param in params :
+                    fallback = fallbacks_by_N.get(param.get('N'))
+                    if fallback :
+                        name,params = fallback,[]
             self.csmap[csname] = color.FAMILIES[name].make_space(params)
         self.csmap.update(
             (name, color.FAMILIES[name].make_space())
