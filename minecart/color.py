@@ -31,7 +31,7 @@ TODO:
   to convert the color into the `Device`'s color space. (`Device` would
   control gamma-correction). `.as_rgb()` would use a default RGB-device to
   convert the color into 'DeviceRGB' space
-* ICCBased, Pattern, Separation, DeviceN colorspaces
+* Pattern, Separation, DeviceN colorspaces
 
 """
 #pylint: disable=R0903
@@ -210,6 +210,7 @@ class DeviceSpace(ColorSpace):
             1.0 - min(1, magenta + black),
             1.0 - min(1, yellow + black)
         )
+
 
 DEVICE_GRAY = DeviceFamily('DeviceGray', (0,)).make_space()
 DEVICE_RGB = DeviceFamily('DeviceRGB', (0, 0, 0)).make_space()
@@ -493,14 +494,54 @@ class IndexedSpace(ColorSpace):
 
 FAMILIES['Indexed'] = ColorSpaceFamily('Indexed', IndexedSpace)
 
+
+class ICCSpace(ColorSpace):
+
+    "A simple implementation of ICC colors using the alternate color space."
+
+    # From the spec (v1.7; Section 4.5 p.253):
+    # > An alternate color space to be used in case the one specified
+    # > in the stream data is not supported (for example, by
+    # > applications designed for earlier versions of PDF). The
+    # > alternate space may be any valid color space (except a Pattern
+    # > color space) that has the number of components specified by
+    # > N. If this entry is omitted and the application does not
+    # > understand the ICC profile data, the color space used is
+    # > DeviceGray, DeviceRGB, or DeviceCMYK, depending on whether
+    # > the value of N is 1, 3, or 4, respectively
+
+    def __init__(self, family, params):
+        stream = params[0]
+        self.n = stream['N']
+        alternate = stream.get('Alternate')
+        if alternate is None:
+            if self.n == 1:
+                self.alternate = DEVICE_GRAY
+            elif self.n == 3:
+                self.alternate = DEVICE_RGB
+            elif self.n == 4:
+                self.alternate = DEVICE_CMYK
+            else:
+                raise ValueError('ICC space must have 1, 3 or 4 componnents')
+        else:
+            self.alternate = make_color_space(alternate)
+        super(ICCSpace, self).__init__(family, self.n)
+
+    def make_color(self, value=None):
+        "Use the alternate color's implementation."
+        return self.alternate.make_color(value)
+
+
+FAMILIES['ICCBased'] = ColorSpaceFamily('ICCBased', ICCSpace)
+
 ############################################################################
-#      Stub implementations ICCBased, Pattern, Separation, and DeviceN     #
+#             Stub implementations Pattern, Separation                     #
 ############################################################################
+
 
 class StubColorSpaceFamily(ColorSpaceFamily):
 
     "A stub implementation with only a number of components."
-
 
     def __init__(self, name, ncomponents):
         super(StubColorSpaceFamily, self).__init__(name, None)
@@ -511,5 +552,18 @@ class StubColorSpaceFamily(ColorSpaceFamily):
         # colorspace
         return ColorSpace(self, self.ncomponents, (0,) * self.ncomponents)
 
+
 for name, ncomps in [('Pattern', 1), ('Separation', 1)]:
     FAMILIES[name] = StubColorSpaceFamily(name, ncomps)
+
+
+def make_color_space(spec):
+    "Translate a string or list into a ColorSpace class."
+    spec = pdfminer.pdftypes.resolve_all(spec)
+    if isinstance(spec, list):
+        name = pdfminer.psparser.literal_name(spec[0])
+        params = spec[1:]
+    else:
+        name = pdfminer.psparser.literal_name(spec)
+        params = []
+    return FAMILIES[name].make_space(params)
