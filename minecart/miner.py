@@ -217,6 +217,7 @@ class DeviceLoader(pdfminer.pdfdevice.PDFTextDevice):
         self.page = None
         self.str_container = None
         self.unit = 1
+        self.tag_stack = []
 
     def __repr__(self):
         return object.__repr__(self)
@@ -243,10 +244,10 @@ class DeviceLoader(pdfminer.pdfdevice.PDFTextDevice):
             device_path.append(tuple(new_seg))
         stroke = StrokeState.from_gs(graphicstate) if stroked else None
         fill = FillState.from_gs(graphicstate) if filled else None
-        self.page.add_shape(Shape(stroke, fill, evenodd, device_path))
+        self.page.add_shape(Shape(stroke, fill, evenodd, device_path), self._current_ocg())
 
     def render_image(self, name, stream):
-        self.page.add_image(Image(self.ctm, stream))
+        self.page.add_image(Image(self.ctm, stream), self._current_ocg())
 
     def render_string_horizontal(self, *args):
         return self.render_string_hv('horizontal', *args)
@@ -310,9 +311,21 @@ class DeviceLoader(pdfminer.pdfdevice.PDFTextDevice):
                     needcharspace = True
                     string.append(font.to_unichr(cid))
                 self.page.add_lettering(Lettering(
-                    u''.join(string), font, self.str_container.bbox, hv == 0))
+                    u''.join(string), font, self.str_container.bbox, hv == 0),
+                    self._current_ocg())
                 self.str_container = None
         return tuple(vec)
+
+    def begin_tag(self, tag, props=None):
+        self.tag_stack.append((tag, props))
+
+    def end_tag(self):
+        self.tag_stack.pop()
+
+    def _current_ocg(self):
+        for tag,props in self.tag_stack:
+            if tag.name == 'OC':
+                return self.page.m_page.resources['Properties'][props.name]
 
 
 class Document(object):
@@ -347,3 +360,21 @@ class Document(object):
             if i == num:
                 self.interpreter.process_page(page)
                 return self.device.page
+
+
+# monkey patching `__eq__`, `__lt__`, `__hash__` for `pdfminer.pdftypes.PDFObjRef`
+def pdfobjref_eq(self, other):
+    return isinstance(other, pdfminer.pdftypes.PDFObjRef) \
+       and self.doc == other.doc \
+       and self.objid == other.objid
+pdfminer.pdftypes.PDFObjRef.__eq__ = pdfobjref_eq
+
+def pdfobjref_lt(self, other):
+    return isinstance(other, pdfminer.pdftypes.PDFObjRef) \
+       and self.objid < other.objid \
+        or self.doc < other.doc
+pdfminer.pdftypes.PDFObjRef.__lt__ = pdfobjref_lt
+
+def pdfobjref_hash(self):
+    return hash((self.doc, self.objid))
+pdfminer.pdftypes.PDFObjRef.__hash__ = pdfobjref_hash

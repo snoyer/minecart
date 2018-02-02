@@ -35,11 +35,13 @@ class GraphicsObject(object):
 
     `z_index` -- the object's height in the stack. (Earliest drawn objects
                  have lower z_indices).
+    `ocg` -- the Optional Content Group the object belongs to (if any)
 
     """
 
     def __init__(self, z_index=0):
         self.z_index = z_index
+        self.ocg = None
 
     def get_bbox(self):
         """
@@ -486,17 +488,54 @@ class Page(object):
             left, bot, right, top = -top, left, -bot, right
         return (left, bot, right, top)
 
-    def add_shape(self, shape):
+    def add_shape(self, shape, ocgref=None):
         "Add the given shape to the page."
         self.shapes.append(shape)
         shape.z_index = next(self.next_z_index)
+        if ocgref:
+            shape.ocg = OCG(ocgref)
 
-    def add_image(self, image):
+    def add_image(self, image, ocgref=None):
         "Add the given image to the page."
         self.images.append(image)
         image.z_index = next(self.next_z_index)
+        if ocgref:
+            image.ocg = OCG(ocgref)
 
-    def add_lettering(self, lettering):
+    def add_lettering(self, lettering, ocgref=None):
         "Add the given lettering to the page."
         self.letterings.append(lettering)
         lettering.z_index = next(self.next_z_index)
+        if ocgref:
+            lettering.ocg = OCG(ocgref)
+
+
+class OCG(object):
+    """
+    An Optional Content Group an object belongs to.
+    """
+    def __init__(self, objref):
+        self.ref = objref
+        self.name = objref.resolve().get('Name')
+
+        root = objref.doc.xrefs[0].trailer['Root']
+        d = root.resolve()['OCProperties']['D']
+        self.off = objref in d.get('OFF', [])
+        self.locked = objref in d.get('Locked', [])
+
+    def __eq__(self, other):
+        return isinstance(other, OCG) and self.ref == other.ref
+
+    def __lt__(self, other):
+        return isinstance(other, OCG) and self.ref < other.ref
+
+    def __hash__(self):
+        return hash(self.ref)
+
+    def __repr__(self):
+        props = ', '.join(filter(None, (
+            repr(self.name),
+            'locked' if self.locked else None,
+            'off' if self.off else None,
+        )))
+        return "<%s %s>" % (self.__class__.__name__, props)
